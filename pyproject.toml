@@ -1,0 +1,26 @@
+[project]
+name = "rag-agent"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { name = "samir pokharel", email = "samirpokharel01@gmail.com" }
+]
+requires-python = ">=3.14"
+dependencies = [
+    "dotenv>=0.9.9",
+    "langchain>=1.5.0",
+    "langchain-community>=0.4.2",
+    "langchain-groq>=1.2.0",
+    "langchain-huggingface>=1.2.3",
+    "langgraph>=1.2.22",
+    "pypdf>=7.1.0",
+    "streamlit>=1.67.0",
+]
+
+[project.scripts]
+rag-agent = "rag_agent:main"
+
+[build-system]
+requires = ["uv_build>=0.12.5,<0.13.0"]
+build-backend = "uv_build"
