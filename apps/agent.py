@@ -12,6 +12,18 @@ from langgraph.checkpoint.memory import InMemorySaver
 import streamlit as st
 import os
 
+
+st.set_page_config(
+    page_title="Miski AI",
+    page_icon="🌟",
+    layout='wide',
+    initial_sidebar_state='expanded'
+)
+
+document_path='./your_documents'
+os.makedirs(document_path,exist_ok=True)
+
+
 if "messages" not in st.session_state:
     st.session_state.messages=[]
 
@@ -25,40 +37,53 @@ if "vector_store" not in st.session_state:
 if "document" not in st.session_state:
     st.session_state.document=False
 
+if "uploaded_files" not in st.session_state:
+    st.session_state.uploaded_files=[]
+
 
 def document_processor(document_path):
 
     # loading documents from a folder/path
-    print("loading document \n")
-    document_loader=PyPDFDirectoryLoader(document_path)
-    loaded_docs=document_loader.load() # documents loaded
-    print('documents loaded successfully.... \n')
+    with st.spinner("Loading documents..."):
+        print("loading document \n")
+        document_loader=PyPDFDirectoryLoader(document_path)
+        loaded_docs=document_loader.load() # documents loaded
+
+        if not loaded_docs:
+            raise ValueError("no redable pdf documents found")
+        print('documents loaded successfully.... \n')
+        st.success(f"loaded {len(loaded_docs)} document pages")
 
 
     # splitting the documents
-    print("splitting documents \n")
-    splitter=RecursiveCharacterTextSplitter(chunk_size=1000,chunk_overlap=200)
-    splitted_docs=splitter.split_documents(loaded_docs)
-    print("document spliitted successfully \n")
+    with st.spinner("splitting documents into chunks"):
+        print("splitting documents \n")
+
+        splitter=RecursiveCharacterTextSplitter(chunk_size=1000,chunk_overlap=200)
+        splitted_docs=splitter.split_documents(loaded_docs)
+        print("document spliitted successfully \n")
+
+    st.success(f"created {len(splitted_docs)} chunks")
 
 
     # embeddings and storing in vector db
 
     @st.cache_resource
     def load_embedding_model():
-        
-        print("loading embedding model \n")
-        embedder = HuggingFaceEmbeddings(
-            model_name='sentence-transformers/all-MiniLM-L6-v2',
-            model_kwargs={'device': 'cpu'},
-            encode_kwargs={'normalize_embeddings': True}
-            )
-        print("embedding model loaded")
+        with st.spinner("generating embeddings..."):
+            print("loading embedding model \n")
+            embedder = HuggingFaceEmbeddings(
+                model_name='sentence-transformers/all-MiniLM-L6-v2',
+                model_kwargs={'device': 'cpu'},
+                encode_kwargs={'normalize_embeddings': True}
+                )
+            print("embedding model loaded")
         return embedder
+
     
     embedder=load_embedding_model()
     vector_db=InMemoryVectorStore.from_documents(embedding=embedder,documents=splitted_docs)
-
+    st.success("embeddings generated successfully")
     print("embeddings generated successfully and stored in vector db")
 
     # llm
@@ -90,6 +115,7 @@ def document_processor(document_path):
 
 
 
+        
     system_prompt=""""
         You are a helpful  assistant to retrieve information and provide answer .
     
@@ -117,64 +143,134 @@ def document_processor(document_path):
 
     st.session_state.agent=agent
     st.session_state.document=True
+    st.session_state.vector_store=vector_db
+
     print("agent loaded successfully ......")
-
-
-#############################################################################
-if not st.session_state.document:
-    document_uploaded=st.file_uploader('upload documents',accept_multiple_files=True)
-
-    if document_uploaded:
-        path='./doc_fileeeee'
-        os.makedirs(path,exist_ok=True)
-
-        # saving the file uploaded by user in a folder path('./doc_fileeee)
-        for files in document_uploaded:
-            
-            with open(os.path.join(path,files.name),'wb') as f:
-                f.write(files.getvalue())
-                print(f"file {files} uploaded in {path}--> as {os.path.join(path,files.name)} \n")
-
-        print("file uploaded successfully \n")
-        print(f"current directory: {os.getcwd()} \n")
-        print(f"files list in {path} is = {os.listdir(path)} \n")
-
-
-        # processing document
-        print("Document processing has started \n")
-        document_processor(path)
-        st.rerun() # from here the whole code from start will run again 
+    return agent
 
 
 
+with st.sidebar:
+    st.title("Miski AI")
+    st.caption("your intelligent document companion")
 
-if st.session_state.agent and st.session_state.document:
+    st.divider()
 
-    for message in st.session_state.messages:
-        st.chat_message(message['role']).markdown(message['content'])
+    if st.button("New Conversation",use_container_width=True):
+        st.session_state.messages=[]
+        st.rerun()
+
+    if st.button("Clear Knowledge Base",use_container_width=True):
+
+        for file in os.listdir(document_path):
+            file_path=os.path.join(document_path,file)
+
+            if os.path.isfile(file_path) and file.lower().endswith('.pdf'):
+                os.remove(file_path)
+
+            st.session_state.messages=[]
+            st.session_state.agent=None
+            st.session_state.vector_store=None
+            st.session_state.document=False
+            st.session_state.uploaded_files=[]
 
 
-    query=st.chat_input("ask anything related to documents you uploaded ?")
+        st.success("Knowledge base reset successfully")
+        st.rerun()
 
-    if query:
 
-        st.session_state.messages.append({
-            'role':'user',
-            'content':query
-        })
-        st.chat_message("user").markdown(query)
+    # document loading gareko
+    st.divider()
+    st.subheader("Knowledge Base")
+    uploaded_files=st.file_uploader("upload pdf documents",type=['pdf'],accept_multiple_files=True)
 
-        with st.spinner("Thinking..........."):
-            response=st.session_state.agent.invoke(
-                {'messages':[{"role":"user",'content':query}]},
-                {'configurable':{'thread_id':'agent1'}}
-                )
-            llm_response=response['messages'][-1].content
-            st.chat_message("Miski").markdown(llm_response)
+    if st.button("Process Document",use_container_width=True):
+        if not uploaded_files:
+            st.warning("please upload files")
+        else:
+            try:
+                with st.status("Processing...") as status:
+                    for file in uploaded_files:
+                        file_path=os.path.join(document_path,file.name)
+                        with open(file_path,'wb') as f:
+                            f.write(file.getvalue())
 
-            st.session_state.messages.append({
-                'role':"ai",
-                'content':llm_response
-            })
+                st.write("documents uploaded successfully (your device)")
+                document_processor(document_path=document_path)
+
+                st.session_state.uploaded_files=[
+                    f.name for f in uploaded_files
+                ]
+                status.update(label="knowledge base ready",state='complete')
+                st.success("Miski is ready")
+                st.rerun()
+
+
+
+            except Exception as e:
+                st.error(f"something went wrong {e}")
+
+
+
+
+
+st.title("Miski personal assistant")
+st.divider()
+
+st.subheader('your documents')
+
+pdf_files=[f for f in os.listdir(document_path) if f.lower().endswith('.pdf')]
+
+if pdf_files:
+    for pdf in pdf_files:
+        with st.expander(f"{pdf}"):
+            st.write(pdf)
+else:
+    st.info("please upload documents")
+
+st.divider()
+
+st.subheader("Settings")
+# clear chat history button hai 
+if st.button("Clear Chat History",use_container_width=True):
+    st.session_state.messages=[]
+    st.rerun()
+
+
+
+
+
+
+
+for message in st.session_state.messages:
+    with st.chat_message(message['role']):
+        st.markdown(message['content'])
+
+
+query=st.chat_input("ask Miski anything you like about your documents")
+
+if query:
+    if st.session_state.agent is None:
+        st.warning("please upload and process pdf documents first .")
+        st.stop()
+
+    st.session_state.messages.append({
+        'role':'user',
+        'content':query
+    })
+
+    with st.chat_message("you"):
+        st.markdown(query)
+
+    with st.chat_message("assistant"):
+        try:
+            with st.spinner("Miski is thinking..."):
+                res=st.session_state.agent.invoke({'messages':[{'role':'user','content':query}]},{'configurable':{'thread_id':'1'}})
+                answer=res['messages'][-1].content
+            st.write(answer)
+
+            st.session_state.messages.append({'role':'assistant','content':answer})
+        except Exception as e:
+            st.error(f"something went wrong {e}")
 
 
