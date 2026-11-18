@@ -6,7 +6,6 @@ from langchain_community.document_loaders import PyPDFDirectoryLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain.tools import tool
-from langchain.agents import create_agent
 from langchain_community.vectorstores import InMemoryVectorStore
 from langgraph.checkpoint.memory import InMemorySaver
 import streamlit as st
@@ -81,8 +80,15 @@ def document_processor(document_path):
             print("embedding model loaded")
         return embedder
 
-    
     embedder=load_embedding_model()
+    vector_db = Chroma(
+    collection_name="miski_knowledge",
+    embedding_function=embedder,
+    persist_directory="./chroma_db"
+    )
+
+    vector_db.delete_collection()
+    
     vector_db=Chroma.from_documents(embedding=embedder,documents=splitted_docs,collection_name="miski_knowledge",persist_directory='./chroma_db')
     st.success("embeddings generated successfully")
     print("embeddings generated successfully and stored in vector db")
@@ -176,6 +182,10 @@ with st.sidebar:
 
             if os.path.isfile(file_path) and file.lower().endswith('.pdf'):
                 os.remove(file_path)
+
+            if os.path.exists('./chroma_db'):
+                import shutil
+                shutil.rmtree('./chroma_db')
 
             st.session_state.messages=[]
             st.session_state.agent=None
