@@ -124,7 +124,7 @@ def document_processor(document_path,user_key):
     # embeddings and storing in vector db
 
     
-    vector_db=get_vector_db()
+    vector_db=get_vector_db(user_key)
     vector_db.add_documents(splitted_docs)
     st.success("embeddings generated successfully")
     print("embeddings generated successfully and stored in vector db")
