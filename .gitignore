@@ -8,6 +8,7 @@ wheels/
 doc_fileeeee
 your_documents
 practice/
+chroma_db/
 
 # Virtual environments
 .venv/

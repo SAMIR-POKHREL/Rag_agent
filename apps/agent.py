@@ -11,7 +11,7 @@ from langchain_community.vectorstores import InMemoryVectorStore
 from langgraph.checkpoint.memory import InMemorySaver
 import streamlit as st
 import os
-
+from langchain_chroma import Chroma
 
 st.set_page_config(
     page_title="Miski AI",
@@ -82,13 +82,21 @@ def document_processor(document_path):
 
     
     embedder=load_embedding_model()
-    vector_db=InMemoryVectorStore.from_documents(embedding=embedder,documents=splitted_docs)
+    vector_db=Chroma.from_documents(embedding=embedder,documents=splitted_docs,collection_name="miski_knowledge",persist_directory='./chroma_db')
     st.success("embeddings generated successfully")
     print("embeddings generated successfully and stored in vector db")
 
     # llm
+    api_key=(
+    st.secrets['GROQ_API_KEY']
+    if "GROQ_API_KEY" in st.secrets else os.getenv("GROQ_API_KEY")
+    )
+    if not api_key:
+        raise ValueError("groq api key is missing")
+
+
     print("llm loaded")
-    llm=ChatGroq(model='openai/gpt-oss-120b',temperature=0)
+    llm=ChatGroq(model='openai/gpt-oss-120b',temperature=0,api_key=api_key)
 
     print("tool loading \n")
     print('context generating........ \n')
