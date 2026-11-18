@@ -10,6 +10,10 @@ from langchain_community.vectorstores import InMemoryVectorStore
 from langgraph.checkpoint.memory import InMemorySaver
 import streamlit as st
 import os
+import uuid
+import hashlib
+import shutil
+from pathlib import Path
 
 from langchain_chroma import Chroma
 
@@ -20,8 +24,51 @@ st.set_page_config(
     initial_sidebar_state='expanded'
 )
 
-document_path='./your_documents'
-os.makedirs(document_path,exist_ok=True)
+if "user_id" not in st.session_state:
+    st.session_state.user_id=uuid.uuid4().hex  
+
+user_id=st.session_state.user_id
+
+# converting it to hex code
+user_key = hashlib.sha256(user_id.encode()).hexdigest()
+
+# two paths for different users
+document_path=f'./user_document/{user_key}'
+
+database_path=f'./chroma_db/{user_key}'
+
+# creating the document path
+os.makedirs(document_path, exist_ok=True)
+
+os.makedirs(database_path, exist_ok=True)
+
+# document_path='./your_documents'
+# os.makedirs(document_path,exist_ok=True)
+    
+@st.cache_resource
+def load_embedding_model():
+    with st.spinner("generating embeddings..."):
+        print("loading embedding model \n")
+        embedder = HuggingFaceEmbeddings(
+            model_name='sentence-transformers/all-MiniLM-L6-v2',
+            model_kwargs={'device': 'cpu'},
+            encode_kwargs={'normalize_embeddings': True}
+            )
+        print("embedding model loaded")
+    return embedder
+
+# vector db
+@st.cache_resource
+def get_vector_db(user_key):
+
+    user_database_path=f'./chroma_db/{user_key}'
+    os.makedirs(user_database_path,exist_ok=True)
+
+    return Chroma(
+        collection_name="miski_knowledge",
+        embedding_function=load_embedding_model(),
+        persist_directory=user_database_path
+    )
 
 
 if "messages" not in st.session_state:
@@ -41,7 +88,12 @@ if "uploaded_files" not in st.session_state:
     st.session_state.uploaded_files=[]
 
 
-def document_processor(document_path):
+
+
+
+
+
+def document_processor(document_path,user_key):
 
     # loading documents from a folder/path
     with st.spinner("Loading documents..."):
@@ -61,35 +113,19 @@ def document_processor(document_path):
 
         splitter=RecursiveCharacterTextSplitter(chunk_size=1000,chunk_overlap=200)
         splitted_docs=splitter.split_documents(loaded_docs)
-        print("document spliitted successfully \n")
 
+
+    print("document spliitted successfully \n")
+
+    
     st.success(f"created {len(splitted_docs)} chunks")
 
 
     # embeddings and storing in vector db
 
-    @st.cache_resource
-    def load_embedding_model():
-        with st.spinner("generating embeddings..."):
-            print("loading embedding model \n")
-            embedder = HuggingFaceEmbeddings(
-                model_name='sentence-transformers/all-MiniLM-L6-v2',
-                model_kwargs={'device': 'cpu'},
-                encode_kwargs={'normalize_embeddings': True}
-                )
-            print("embedding model loaded")
-        return embedder
-
-    embedder=load_embedding_model()
-    vector_db = Chroma(
-    collection_name="miski_knowledge",
-    embedding_function=embedder,
-    persist_directory="./chroma_db"
-    )
-
-    vector_db.delete_collection()
     
-    vector_db=Chroma.from_documents(embedding=embedder,documents=splitted_docs,collection_name="miski_knowledge",persist_directory='./chroma_db')
+    vector_db=get_vector_db()
+    vector_db.add_documents(splitted_docs)
     st.success("embeddings generated successfully")
     print("embeddings generated successfully and stored in vector db")
 
@@ -177,15 +213,26 @@ with st.sidebar:
 
     if st.button("Clear Knowledge Base",use_container_width=True):
 
+        # current users database
+        vector_db=get_vector_db(user_key)
+
+        # get existing records
+        existing=vector_db.get(include=[])
+
+        # delete the existing data
+        if existing['ids']:
+            vector_db.delete(ids=existing['ids'])    
+
+         # Delete only this user's PDFs
         for file in os.listdir(document_path):
-            file_path=os.path.join(document_path,file)
 
-            if os.path.isfile(file_path) and file.lower().endswith('.pdf'):
+            file_path = os.path.join(document_path, file)
+
+            if os.path.isfile(file_path) and file.lower().endswith(".pdf"):
                 os.remove(file_path)
+        
 
-            if os.path.exists('./chroma_db'):
-                import shutil
-                shutil.rmtree('./chroma_db')
+           
 
             st.session_state.messages=[]
             st.session_state.agent=None
@@ -215,7 +262,7 @@ with st.sidebar:
                             f.write(file.getvalue())
 
                 st.write("documents uploaded successfully (your device)")
-                document_processor(document_path=document_path)
+                document_processor(document_path=document_path,user_key=user_key)
 
                 st.session_state.uploaded_files=[
                     f.name for f in uploaded_files
@@ -284,7 +331,7 @@ if query:
     with st.chat_message("assistant"):
         try:
             with st.spinner("Miski is thinking..."):
-                res=st.session_state.agent.invoke({'messages':[{'role':'user','content':query}]},{'configurable':{'thread_id':'1'}})
+                res=st.session_state.agent.invoke({'messages':[{'role':'user','content':query}]},{'configurable':{'thread_id':user_key}})
                 answer=res['messages'][-1].content
             st.write(answer)
 
